@@ -6,6 +6,8 @@ import logging
 import re
 import httplib
 from BeautifulSoup import BeautifulSoup
+from myData import NUMBER_QSH, NUMBER_SH, HELP_INFO, PIC_MSG_TPL, \
+     TEXT_MSG_TPL, SORRY_MSG, XC_DATA
 
 app = Flask(__name__)
 app.debug = True
@@ -37,7 +39,8 @@ def weixin_msg():
             return help_info(msg)
         elif is_text_msg(msg):
             content = msg['Content']
-            content = content.encode('UTF-8')
+            content = content.encode('UTF-8').strip()
+            
             #logging.warning(content)
             if content == u'?' or content == u'？':
                 return help_info(msg)
@@ -49,15 +52,50 @@ def weixin_msg():
                 return response_text_msg(msg, getBBS())
             elif len(content) == 2 and content.lower() == 'dk':
                 return response_text_msg(msg, getRIEST())
+            elif len(content) == 3 and content.lower() == 'qsh':
+                return response_text_msg(msg, NUMBER_QSH)
+            elif len(content) == 2 and content.lower() == 'sh':
+                return response_text_msg(msg, NUMBER_SH)
+            elif len(content) == 2 and content.lower() == 'xc':
+                return getXC(msg)
+            elif len(content) > 2 and content[0:2].lower() == 'kd':
+                return response_text_msg(msg, getExpress(content[2:]))
             else :
                 return response_text_msg(msg, u'无法识别，请回复"?"查看帮助')
     return 'message processing fail'
 
-SORRY_MSG = \
-u"""
-查询失败，请回复"?"查看帮助'
-"""
+def test():
+    url = 'http://www.aikuaidi.cn/rest/?key=76b9c59566e54e82909af1f6aa0e46fc&order=028435956303&id=shunfeng&ord=&show=xml'
+    return urllib.urlopen(url).read()
 
+def getExpress(order):
+    url = 'http://www.aikuaidi.cn/rest/?key=76b9c59566e54e82909af1f6aa0e46fc&order=%s&id=%s&ord=&show=xml'
+    ID = ['shentong', 'yuantong', 'yunda', 'shunfeng', 'zhongtong', 'guotong']
+    log = ''
+    for i in range(6):
+        res = urllib.urlopen(url % (order, ID[i])).read()
+        soup = BeautifulSoup(res)
+        errCode = soup.find('errcode')
+        if errCode.string != '0':
+            continue
+        status = soup.find('status')
+        if  status.string == '1':
+            continue
+        log += soup.find('name').string + ':' + order + '\n'
+    
+        orders = soup.find('data').findAll('order')
+        for o in orders:
+            log += o.find('time').string + ':' + o.find('content').string + '\n'
+        break
+    if log == '':
+        return u'暂无记录或者订单号有误,请保证是：顺丰/申通/圆通/韵达/中通/国通！'
+    else :
+        return log
+def getPARAM(httpRes, cookieName):
+    coo = httpRes['set-cookie']
+    start = coo.find(cookieName) + len(cookieName) + 1
+    end = coo.find(";", start)
+    return coo[start:end]
 def getRIEST():
     url = 'http://riest.uestc.edu.cn/'
     res = urllib.urlopen(url).read()
@@ -78,11 +116,7 @@ def getRIEST():
         newRiest += '[%d]'%(i+1) + con[i].next + '\n'
         i += 1
     return newRiest
-def getPARAM(httpRes, cookieName):
-    coo = httpRes['set-cookie']
-    start = coo.find(cookieName) + len(cookieName) + 1
-    end = coo.find(";", start)
-    return coo[start:end] 
+        
 def getBBS():
     BBS_HOST = "bbs.qshpan.com"
     UC_HOST = "uc.stuhome.net"
@@ -124,7 +158,6 @@ def getBBS():
     header = res.msg
     WINDUSER = getPARAM(header, '56f61_winduser')
     LASTVISIT = getPARAM(header, '56f61_lastvisit')
-    LASTVISIT = getPARAM(header, '56f61_lastvisit')
     #goindex
     coo = '56f61_winduser=' + WINDUSER + '; PHPSESSID' + PHPSESSID + '; 56f61_lastvisit='+LASTVISIT
     headers = {'Cookie':coo, 'Referer':ref}
@@ -140,11 +173,11 @@ def getBBS():
     while i < 10:
         ss = str(con[i*4])
         start = ss.find('>') + 1
-        if ss[start] == '<':
+        while ss[start] == '<':
             start = ss.find('>', start) + 1
         end = ss.find('<', start)
         resCon += '[%s]'%(str(i+1)) + \
-                  unicode(ss[start:end].replace('&nbsp;', ''), 'UTF-8')
+                  unicode(ss[start:end].replace('&nbsp;', ''), 'UTF-8') + '\n'
         
         ss = str(con[i*4+3])
         start = ss.find('>') + 1
@@ -158,6 +191,7 @@ def getBBS():
                   unicode(ss[start:end], 'UTF-8') + ']\n'
         i += 1
     return resCon
+
 def getRIEST():
     url = 'http://riest.uestc.edu.cn/'
     res = urllib.urlopen(url).read()
@@ -178,8 +212,9 @@ def getRIEST():
         newRiest += '[%d]'%(i+1) + con[i].next + '\n'
         i += 1
     return newRiest
+
 def getWether():
-    info = u'[成都]'
+    info = u'【成都】'
     url = 'http://m.weather.com.cn/data/101270101.html'
     res = urllib.urlopen(url).read()
     date = re.search(r'(?<="date_y":").*?(?=",")', res).group()
@@ -193,7 +228,7 @@ def getWether():
     return info
 
 def getBUS(info):
-    #info = urllib.quote(info)
+    info = urllib.quote(info)
     metro = ['%e5%9c%b0%e9%93%811%e5%8f%b7%e7%ba%bf', \
              '%e5%9c%b0%e9%93%812%e5%8f%b7%e7%ba%bf', \
              '%e5%9c%b0%e9%93%813%e5%8f%b7%e7%ba%bf', \
@@ -238,6 +273,7 @@ def getBUS(info):
     else:
         route = ''
         url = 'http://m.8684.cn/chengdu_so?k=p&q=' + info
+        #return url
         res = urllib.urlopen(url).read()
         soup = BeautifulSoup(res)
         con = soup.find("ul", {"class":"siteDetails_bus"})
@@ -281,76 +317,17 @@ def is_text_msg(msg):
 def user_subscribe_event(msg):
     return msg['MsgType'] == 'event' and msg['Event'] == 'subscribe'
 
-HELP_INFO = \
-u"""
-欢迎关注程序猿int64Ago的试验品^_^ 目前功能包括：
-【成都公交】【成都天气】【河畔最新发/回帖】【电科院新闻公告】
 
-发送gj+线路/站点名称(gj不区分大小写，下同)，即可查询公交路线或站点信息
-eg:'Gj34a'查询34A路公交线路，'gj一环路东一段'查询经过此站点公交
-
-发送tq，即可查询最近几天成都天气
-
-发送hp，可查询河畔首页最新发表和最新回复
-
-发送dk，可获取电科院最新新闻和通告
-"""
 
 def help_info(msg):
     return response_text_msg(msg, HELP_INFO)
 
 
-NEWS_MSG_HEADER_TPL = \
-u"""
-<xml>
-<ToUserName><![CDATA[%s]]></ToUserName>
-<FromUserName><![CDATA[%s]]></FromUserName>
-<CreateTime>%s</CreateTime>
-<MsgType><![CDATA[news]]></MsgType>
-<Content><![CDATA[]]></Content>
-<ArticleCount>%d</ArticleCount>
-<Articles>
-"""
-
-NEWS_MSG_TAIL = \
-u"""
-</Articles>
-<FuncFlag>1</FuncFlag>
-</xml>
-"""
-
-#消息回复，采用news图文消息格式
-def response_news_msg(recvmsg, books):
-    msgHeader = NEWS_MSG_HEADER_TPL % (recvmsg['FromUserName'], recvmsg['ToUserName'], 
-        str(int(time.time())), len(books))
-    msg = ''
-    msg += msgHeader
-    msg += make_articles(books)
-    msg += NEWS_MSG_TAIL
+def getXC(recvmsg):
+    url = 'weixint64ago.sinaapp.com/static/img/xc.jpg'
+    msg = PIC_MSG_TPL % (recvmsg['FromUserName'], recvmsg['ToUserName'], 
+        str(int(time.time())), XC_DATA, url, url)
     return msg
-
-
-NEWS_MSG_ITEM_TPL = \
-u"""
-<item>
-    <Title><![CDATA[%s]]></Title>
-    <Description><![CDATA[%s]]></Description>
-    <PicUrl><![CDATA[%s]]></PicUrl>
-    <Url><![CDATA[%s]]></Url>
-</item>
-"""
-
-TEXT_MSG_TPL = \
-u"""
-<xml>
-<ToUserName><![CDATA[%s]]></ToUserName>
-<FromUserName><![CDATA[%s]]></FromUserName>
-<CreateTime>%s</CreateTime>
-<MsgType><![CDATA[text]]></MsgType>
-<Content><![CDATA[%s]]></Content>
-<FuncFlag>0</FuncFlag>
-</xml>
-"""
 
 def response_text_msg(msg, content):
     s = TEXT_MSG_TPL % (msg['FromUserName'], msg['ToUserName'], 
